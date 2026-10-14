@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  passwordHash String
+  createdAt    DateTime    @default(now())
+  classrooms   Classroom[]
+}
+
+model Classroom {
+  id        String       @id @default(uuid())
+  name      String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  ownerId   String
+  submissionCodeHash String? @unique
+  owner     User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents Submission[]
+
+  @@index([ownerId, updatedAt])
+}
+
+model Submission {
+  id           String    @id @default(uuid())
+  studentName  String
+  originalName String
+  mimeType     String
+  fileSize     Int
+  storagePath  String
+  plainText    String    @db.Text
+  pageTexts    String?   @db.Text
+  receiptCodeHash String?
+  webSearchStatus String @default("PENDING")
+  webSearchResults String? @db.Text
+  webSearchError String?
+  createdAt    DateTime  @default(now())
+  classroomId  String
+  classroom    Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+
+  @@index([classroomId, createdAt])
+  @@index([receiptCodeHash])
+}
