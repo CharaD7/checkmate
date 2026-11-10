@@ -41,8 +41,20 @@ describe('buildBraveQueries', () => {
       'Student Name',
     );
 
-    expect(queries).toHaveLength(3);
-    expect(queries.map((item) => item.pageNumber)).toEqual([1, 3, 4]);
+    expect(queries).toHaveLength(12);
+    expect(queries.map((item) => item.pageNumber)).toEqual([
+      1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4,
+    ]);
     expect(queries.every((item) => item.query.split(' ').length === 8)).toBe(true);
+  });
+
+  it('samples up to twelve excerpts across the document', () => {
+    const pageText =
+      'this page contains enough lower case words to make a useful search';
+    const queries = buildBravePageQueries(Array(20).fill(pageText), 'Student Name');
+
+    expect(queries).toHaveLength(12);
+    expect(queries[0].pageNumber).toBe(1);
+    expect(queries[queries.length - 1].pageNumber).toBe(20);
   });
 });

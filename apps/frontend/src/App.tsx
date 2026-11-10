@@ -46,6 +46,12 @@ type WebSource = {
   description: string;
   matchedPhrase: string;
   pageNumber: number;
+  verifiedMatches: Array<{
+    text: string;
+    sourceText: string;
+    matchedPhraseCount: number;
+    lineScorePercent: number;
+  }>;
 };
 type PageMatch = {
   pageNumber: number;
@@ -1214,8 +1220,10 @@ function ClassWorkspace({
             <span className="pair-scope">BRAVE SEARCH</span>
           </div>
           <p className="web-search-notice">
-            Up to three short excerpts are searched. The entered student name,
-            filename, and file metadata are not sent to Brave.
+            Up to 12 short excerpts are searched across the document. Exact
+            overlap is checked against returned excerpts; a search lead alone
+            does not affect the page score. Names, filenames, and file metadata
+            are not sent to Brave.
           </p>
           {webCheckActionError && (
             <p className="web-check-message" role="alert">{webCheckActionError}</p>
@@ -1243,11 +1251,22 @@ function ClassWorkspace({
                   )}
                 {submission.webSearchResults.map((source) => (
                   <div className="web-source" key={`${submission.id}-${source.url}`}>
+                    <strong>
+                      {source.verifiedMatches.length > 0
+                        ? 'EXACT RESULT-EXCERPT OVERLAP'
+                        : 'UNVERIFIED PUBLIC-WEB LEAD'}
+                    </strong>
                     <a href={source.url} target="_blank" rel="noreferrer">
                       {source.title}
                     </a>
                     <p>{source.description}</p>
                     <small>Excerpt searched: “{source.matchedPhrase}”</small>
+                    {source.verifiedMatches.length === 0 && (
+                      <small>
+                        No exact five-word overlap was found in the returned
+                        excerpt; this lead is not included in the page score.
+                      </small>
+                    )}
                   </div>
                 ))}
                 {submission.webSearchStatus !== 'SKIPPED' && (
@@ -1303,9 +1322,10 @@ function ClassWorkspace({
             <>
               <p className="evidence-score-explainer">
                 {selectedEvidenceSubmission.matchedPageCount} of{' '}
-                {selectedEvidenceSubmission.pageCount} pages have an archive
-                match or public-web source lead. This is a review signal, not a
-                finding of plagiarism.
+                {selectedEvidenceSubmission.pageCount} pages have an exact
+                archive match or a five-word overlap in a Brave result excerpt.
+                Search leads without excerpt overlap do not count. This is a
+                review signal, not a finding of plagiarism.
               </p>
               <div className="document-evidence-list">
                 {selectedDocumentMatches.map((match) => (
@@ -1334,11 +1354,29 @@ function ClassWorkspace({
                   >
                     <div className="evidence-match-meta">
                       <strong>{formatPage(source.pageNumber)}</strong>
-                      <span>PUBLIC WEB SOURCE LEAD</span>
+                      <span>
+                        {source.verifiedMatches.length > 0
+                          ? 'EXACT RESULT-EXCERPT OVERLAP'
+                          : 'UNVERIFIED PUBLIC WEB LEAD'}
+                      </span>
                     </div>
-                    <p className="matched-passage">
-                      <mark>{source.matchedPhrase}</mark>
-                    </p>
+                    {source.verifiedMatches.map((match, index) => (
+                      <div className="matched-passage" key={`${index}-${match.text}`}>
+                        <p>
+                          Submitted text · {match.lineScorePercent}% page
+                          phrase overlap
+                        </p>
+                        <mark>{match.text}</mark>
+                        <p>Returned search excerpt</p>
+                        <mark>{match.sourceText}</mark>
+                      </div>
+                    ))}
+                    {source.verifiedMatches.length === 0 && (
+                      <p className="matched-passage">
+                        Excerpt searched: “{source.matchedPhrase}” · no exact
+                        five-word overlap found in the returned result excerpt.
+                      </p>
+                    )}
                     <a href={source.url} target="_blank" rel="noreferrer">
                       {source.title}
                     </a>
@@ -1535,8 +1573,10 @@ function UploadPanel({
       <div className="upload-footer">
         <p>
           <ShieldCheck size={15} />
-          Stored locally. Up to three short excerpts are sent to Brave Search;
-          entered names, filenames, and file metadata are excluded.
+          Stored locally. Up to 12 short excerpts are sent to Brave Search;
+          entered names, filenames, and file metadata are excluded. A search
+          result is scored only when its returned excerpt contains an exact
+          five-word overlap.
         </p>
         <button
           className="primary-button"
@@ -1732,11 +1772,29 @@ function StudentResultsPage({
                     >
                       <div className="evidence-match-meta">
                         <strong>{formatPage(source.pageNumber)}</strong>
-                        <span>PUBLIC SOURCE LEAD</span>
+                        <span>
+                          {source.verifiedMatches.length > 0
+                            ? 'EXACT RESULT-EXCERPT OVERLAP'
+                            : 'UNVERIFIED PUBLIC SOURCE LEAD'}
+                        </span>
                       </div>
-                      <p className="matched-passage">
-                        <mark>{source.matchedPhrase}</mark>
-                      </p>
+                      {source.verifiedMatches.map((match, index) => (
+                        <div className="matched-passage" key={`${index}-${match.text}`}>
+                          <p>
+                            Submitted text · {match.lineScorePercent}% page
+                            phrase overlap
+                          </p>
+                          <mark>{match.text}</mark>
+                          <p>Returned search excerpt</p>
+                          <mark>{match.sourceText}</mark>
+                        </div>
+                      ))}
+                      {source.verifiedMatches.length === 0 && (
+                        <p className="matched-passage">
+                          Excerpt searched: “{source.matchedPhrase}” · no exact
+                          five-word overlap found in the returned result excerpt.
+                        </p>
+                      )}
                       <a href={source.url} target="_blank" rel="noreferrer">
                         {source.title}
                       </a>
@@ -1921,10 +1979,11 @@ function StudentSubmissionPage({
                       onChange={(event) => setWebCheckConsent(event.target.checked)}
                     />
                     <span>
-                      I agree to a public web check. Up to three short excerpts
+                      I agree to a public web check. Up to 12 short excerpts
                       from my document will be sent to Brave Search; my name,
                       filename, and file metadata will not be sent. I can submit
-                      without the web check.
+                      without the web check. Search-result leads without an
+                      exact five-word overlap are not included in the score.
                     </span>
                   </label>
                   <button

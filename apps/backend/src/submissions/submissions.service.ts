@@ -11,7 +11,7 @@ import { extname, resolve } from 'node:path';
 import { hashSubmissionCode } from '../classes/submission-code';
 import { PrismaService } from '../prisma/prisma.service';
 import { extractDocumentPages } from './document-extractor';
-import { comparePages, PageMatch } from './similarity';
+import { comparePages, compareText, PageMatch } from './similarity';
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_FILES_PER_UPLOAD = 10;
@@ -30,6 +30,12 @@ export interface WebSource {
   description: string;
   matchedPhrase: string;
   pageNumber: number;
+  verifiedMatches: Array<{
+    text: string;
+    sourceText: string;
+    matchedPhraseCount: number;
+    lineScorePercent: number;
+  }>;
 }
 
 export interface ArchiveComparison {
@@ -66,7 +72,9 @@ interface BraveResponse {
   web?: { results?: BraveResult[] };
 }
 
-const MAX_WEB_QUERIES = 3;
+const MAX_QUERIES_PER_PAGE = 3;
+const MAX_WEB_QUERIES = 12;
+const MAX_WEB_SOURCES = 30;
 const WORDS_PER_QUERY = 8;
 
 @Injectable()
@@ -381,6 +389,7 @@ export class SubmissionsService {
           archivePageMatches.get(document.id) ?? new Set<number>();
         const webPages = new Set(
           webSearchResults
+            .filter((source) => source.verifiedMatches.length > 0)
             .map((source) => source.pageNumber)
             .filter((pageNumber) => pageNumber > 0),
         );
@@ -410,7 +419,7 @@ export class SubmissionsService {
       method: {
         name: 'Page-level exact phrase overlap',
         caveat:
-          'The percentage is the share of rendered pages with at least one exact shared five-word phrase in the instructor archive or a public-web source lead. Archive matches are exact text overlaps. Web results come from a limited Brave Search sample, not the entire internet. Matches are evidence for review, not findings of plagiarism.',
+        'The percentage is the share of rendered pages with at least one exact shared five-word phrase in the instructor archive or a Brave result excerpt. Public-web matches are verified only against the search-result excerpt, not the full source page, and cover a limited sample of the public index. Search leads without an excerpt overlap are not scored. Matches are evidence for review, not findings of plagiarism.',
       },
     };
   }
@@ -495,6 +504,7 @@ export class SubmissionsService {
         );
         const webPages = new Set(
           webSearchResults
+            .filter((source) => source.verifiedMatches.length > 0)
             .map((source) => source.pageNumber)
             .filter((pageNumber) => pageNumber > 0),
         );
@@ -520,7 +530,7 @@ export class SubmissionsService {
         };
       }),
       method:
-        'The percentage is the share of pages with at least one exact five-word archive match or public-web source lead. Web checks cover a limited sample of the public search index, not the entire internet. This is a review signal, not a finding of plagiarism.',
+        'The percentage is the share of pages with at least one exact five-word archive match or a matching phrase in a Brave result excerpt. Web matches are verified against the search-result excerpt, not the full source page, and cover a limited public-index sample. Search leads without an excerpt overlap are not scored. This is a review signal, not a finding of plagiarism.',
     };
   }
 
@@ -705,12 +715,26 @@ export class SubmissionsService {
           if (sourceUrl.protocol !== 'https:' && sourceUrl.protocol !== 'http:') {
             continue;
           }
+          const description = result.description.slice(0, 800);
+          const verification = compareText(
+            pageTexts[pageNumber - 1] ?? '',
+            description,
+          );
           sources.set(`${result.url}:${pageNumber}`, {
             title: result.title.slice(0, 300),
             url: result.url,
-            description: result.description.slice(0, 800),
+            description,
             matchedPhrase: query,
             pageNumber,
+            verifiedMatches: verification.passages.map((passage) => ({
+              text: passage.left,
+              sourceText: passage.right,
+              matchedPhraseCount: passage.matchedPhraseCount,
+              lineScorePercent: Math.round(
+                (passage.matchedPhraseCount / verification.leftPhraseCount) *
+                  100,
+              ),
+            })),
           });
         }
 
@@ -727,7 +751,7 @@ export class SubmissionsService {
     await this.saveWebSearch(
       submissionId,
       'COMPLETE',
-      [...sources.values()].slice(0, 10),
+      [...sources.values()].slice(0, MAX_WEB_SOURCES),
       null,
     );
   }
@@ -795,6 +819,26 @@ export class SubmissionsService {
         url: source.url,
         description: source.description,
         matchedPhrase: source.matchedPhrase,
+        verifiedMatches: Array.isArray(source.verifiedMatches)
+          ? source.verifiedMatches.map((match) => {
+              if (
+                !match ||
+                typeof match !== 'object' ||
+                typeof match.text !== 'string' ||
+                typeof match.sourceText !== 'string' ||
+                !Number.isInteger(match.matchedPhraseCount) ||
+                !Number.isInteger(match.lineScorePercent)
+              ) {
+                throw new Error('Stored public web match evidence is invalid.');
+              }
+              return {
+                text: match.text,
+                sourceText: match.sourceText,
+                matchedPhraseCount: match.matchedPhraseCount,
+                lineScorePercent: match.lineScorePercent,
+              };
+            })
+          : [],
         pageNumber:
           Number.isInteger(source.pageNumber) && (source.pageNumber ?? 0) > 0
             ? source.pageNumber!
@@ -860,10 +904,10 @@ export function buildBraveQueries(text: string, studentName: string): string[] {
     saveRunWindows();
   }
   const uniqueWindows = [...new Set(windows)];
-  if (uniqueWindows.length <= MAX_WEB_QUERIES) return uniqueWindows;
-  return Array.from({ length: MAX_WEB_QUERIES }, (_, index) => {
+  if (uniqueWindows.length <= MAX_QUERIES_PER_PAGE) return uniqueWindows;
+  return Array.from({ length: MAX_QUERIES_PER_PAGE }, (_, index) => {
     const position = Math.round(
-      (index * (uniqueWindows.length - 1)) / (MAX_WEB_QUERIES - 1),
+      (index * (uniqueWindows.length - 1)) / (MAX_QUERIES_PER_PAGE - 1),
     );
     return uniqueWindows[position];
   }).filter((query, index, all) => all.indexOf(query) === index);
@@ -873,17 +917,12 @@ export function buildBravePageQueries(
   pageTexts: string[],
   studentName: string,
 ): Array<{ pageNumber: number; query: string }> {
-  const candidates = pageTexts.flatMap((pageText, index) => {
-    const queries = buildBraveQueries(pageText, studentName);
-    return queries.length === 0
-      ? []
-      : [
-          {
-            pageNumber: index + 1,
-            query: queries[Math.floor(queries.length / 2)],
-          },
-        ];
-  });
+  const candidates = pageTexts.flatMap((pageText, index) =>
+    buildBraveQueries(pageText, studentName).map((query) => ({
+      pageNumber: index + 1,
+      query,
+    })),
+  );
   if (candidates.length <= MAX_WEB_QUERIES) return candidates;
   return Array.from({ length: MAX_WEB_QUERIES }, (_, index) => {
     const position = Math.round(

@@ -32,11 +32,11 @@ Educators create classes, collect work directly or through a shareable student l
 - Student receipt links expose matches from the submitting instructor's archive only as anonymized source labels; they do not expose other students' names, document names, or reports.
 - Uploaded PDFs and rendered DOCX documents retain page boundaries so matched-page coverage can be calculated and reviewed with page numbers.
 - Student link submitters can decline the public-web check and still submit their work.
-- A consented public-web check sends up to three short excerpts sampled across document pages to Brave Search. Each returned source lead is linked to the excerpt's page. The entered student name, filename, email addresses, URLs, phone numbers, and file metadata are excluded from queries.
+- A consented public-web check sends up to 12 short excerpts sampled across document pages to Brave Search. Each returned result is linked to the excerpt's page, and its search description is checked for exact five-word overlap with the submitted page. This verifies only the returned search excerpt, not the full source page. The entered student name, filename, email addresses, URLs, phone numbers, and file metadata are excluded from queries.
 - Educators can compare work with submissions from all of their own classes; student links cannot view class submissions, archive matches, or reports.
 - Brave Search results are limited public-index source leads for human inspection, not exhaustive internet coverage, Turnitin matches, or plagiarism findings.
 - Educators can delete individual submissions and entire classes, including their comparison records and stored files.
-- Page match percentage is the share of rendered pages with one or more exact five-word archive matches or public-web source leads. Archive overlap and public-web leads are reported separately; neither is an automated finding of plagiarism or misconduct.
+- Page match percentage is the share of rendered pages with one or more exact five-word archive matches or verified overlaps in returned Brave result excerpts. Unverified public-web leads are visible but excluded from the score. Neither signal is an automated finding of plagiarism or misconduct.
 - Use pnpm as the default package manager.
 - The web interface offers light and dark themes, with light mode as the default.
 - Use PostgreSQL for application data and a local on-disk uploads directory for documents in the local MVP.
